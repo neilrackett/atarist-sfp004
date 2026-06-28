@@ -1,3 +1,8 @@
+/*
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 /**
  * File: atari_sfp004.c
  * Description: Optional 68881/68882 FPU dispatch via the SFP-004 memory-mapped

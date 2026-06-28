@@ -1,4 +1,9 @@
 /*
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
  * fpubench.c - Soft-float / integer vs SFP-004 68882 micro-benchmark.
  *
  * Times three workloads, each two ways, with the 200 Hz system clock and reports

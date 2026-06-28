@@ -1,4 +1,9 @@
 /*
+ * Copyright (C) 2026 Neil Rackett
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
+/*
  * fputest.c - Standalone correctness harness for the SFP-004 68882 dispatch.
  *
  * Exercises linuxdoom-1.10/atari_sfp004.c: for each test case it computes the

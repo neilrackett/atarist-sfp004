@@ -3,7 +3,7 @@
 <table>
 <tr>
 <td valign="top">
-<video src="knotmesh.mp4" width="400" height="400" autoplay muted loop playsinline></video>
+<video src="https://github.com/user-attachments/assets/5397abf9-f325-4779-be83-d6a4f93b85ea" width="400" height="400" autoplay muted loop playsinline></video>
 </td>
 <td valign="top">
 <img src="torus.png" height="128" /><br />

@@ -1,8 +1,17 @@
 # Examples — Torus-Knot & Cube Renderers
 
-<img src="torus.png" width="240" />
-<img src="cubemesh.png" width="240" />
-<img src="knotmesh.png" width="240" />
+<table>
+<tr>
+<td valign="top">
+<video src="knotmesh.mp4" width="400" height="400" autoplay muted loop playsinline></video>
+</td>
+<td valign="top">
+<img src="torus.png" height="128" /><br />
+<img src="cubemesh.png" height="128" /><br />
+<img src="knotmesh.png" height="128" />
+</td>
+</tr>
+</table>
 
 Three flat-shaded 3D demos driving the SFP-004 FPU through the library's
 fused-dispatch session layer: a rotating (2,3) trefoil torus knot rendered two

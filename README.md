@@ -7,9 +7,18 @@ By [Neil Rackett](https://x.com/neilrackett).
 
 ## Introduction
 
-<img src="examples/torus.png" width="240" />
-<img src="examples/cubemesh.png" width="240" />
-<img src="examples/knotmesh.png" width="240" />
+<table>
+<tr>
+<td valign="top">
+<video src="examples/knotmesh.mp4" width="400" height="400" autoplay muted loop playsinline></video>
+</td>
+<td valign="top">
+<img src="examples/torus.png" height="128" /><br />
+<img src="examples/cubemesh.png" height="128" /><br />
+<img src="examples/knotmesh.png" height="128" />
+</td>
+</tr>
+</table>
 
 A 68000 has no coprocessor interface, so you can't drive an FPU with `-m68881`
 coprocessor instructions (`FADD` etc.) — they trap. The SFP-004 design maps
@@ -159,19 +168,11 @@ they exercise (and confirm) the soft-float fallback.
 
 ## Examples
 
-`examples/` contains four demos built on the library's fused-dispatch session
-layer, all flat-shaded 3D in ST low-res with on-screen ms/frame counters:
+The examples folder contains four demos built on the library's fused-dispatch
+session layer, all flat-shaded 3D in ST low-res with on-screen ms/frame
+counters.
 
-| Binary                  | What it is                                                                                                                                                                                                                   | Speed¹                             |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `examples/TORUS.TOS`    | Real-time SDF raymarcher of a (2,3) trefoil torus knot — every pixel is sphere-traced signed-distance work on the 68882 in fused CIR sessions                                                                                | seconds per frame, and proud of it |
-| `examples/TORUSHI.TOS`  | The same raymarcher at 4× the ray count                                                                                                                                                                                      | slower still                       |
-| `examples/KNOTMESH.TOS` | The same knot as a low-poly faceted mesh: fused vertex transforms on the 68882, integer culling/sorting/rasterising on the 68000, full 320×200                                                                               | ~6 fps                             |
-| `examples/CUBEMESH.TOS` | The traditional flat-shaded spinning cube on the same pipeline — minimum geometry, so a friendly benchmark for comparing STs of different specs: the transform counter shows what the FPU buys, the rest shows CPU/bus speed | VBL-synced 25–50 fps               |
-
-¹ On a 16 MHz Mega STE with cache and a 68882.
-
-Build with `make examples`; see `examples/README.md` for details and tuning.
+For more information, see [examples/README.md](examples/README.md).
 
 ## Credits & licence
 

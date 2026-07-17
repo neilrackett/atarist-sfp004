@@ -63,4 +63,130 @@ float sfp004_sqrt(float x);
  * required when an FPU is present (CIR access) — see the note in atari_sfp004.c. */
 long sfp004_fixdiv(long a, long b);
 
+/* -------------------------------------------------------------------------
+ * Fused-dispatch (session) layer
+ *
+ * Every scalar entry point above pays for a complete coprocessor dialog per
+ * flop: FRESTORE, FMOVE.S in, the op, FMOVE.S out — four command/response
+ * exchanges plus the call itself. A hot inner loop (a raymarcher step, a dot
+ * product) spends most of its time in that per-call overhead. This layer
+ * exposes the dialog primitives so a caller can keep intermediates in FP0-FP7
+ * across many operations and read back only final results: begin a session
+ * (one FRESTORE), issue any mix of memory-source and register-register
+ * commands, then read out what's needed.
+ *
+ * Rules: supervisor mode only, and only when sfp004_available() — these
+ * primitives don't check, callers gate themselves. A session owns the FPU
+ * until its last read-out; don't call the scalar entry points mid-session
+ * (they FRESTORE, clobbering the FP register file). Operands and results are
+ * raw single-precision bit patterns (use a float/unsigned long union).
+ */
+
+/* Extension-word opcodes (bits 6-0 of the cpGEN command word). FSGLDIV and
+ * FSGLMUL are the 68882's fast single-precision variants (results rounded to
+ * single) — 15-30 FPU cycles cheaper than FDIV/FMUL, and exact for pipelines
+ * whose data are singles anyway. */
+#define SFP004_FOP_FMOVE   0x00 /* FMOVE  (register copy / memory load)    */
+#define SFP004_FOP_FINTRZ  0x03 /* FINTRZ (truncate toward zero)           */
+#define SFP004_FOP_FSQRT   0x04 /* FSQRT  (monadic)                        */
+#define SFP004_FOP_FABS    0x18 /* FABS   (monadic)                        */
+#define SFP004_FOP_FNEG    0x1A /* FNEG   (monadic)                        */
+#define SFP004_FOP_FDIV    0x20 /* FDIV                                    */
+#define SFP004_FOP_FADD    0x22 /* FADD                                    */
+#define SFP004_FOP_FMUL    0x23 /* FMUL                                    */
+#define SFP004_FOP_FSGLDIV 0x24 /* FSGLDIV (fast single divide)            */
+#define SFP004_FOP_FSGLMUL 0x27 /* FSGLMUL (fast single multiply)          */
+#define SFP004_FOP_FSUB    0x28 /* FSUB                                    */
+
+/* Command-word builders (cpGEN format, per the command-word notes in
+ * atari_sfp004.c: bit 14 = R/M, bit 13 = 0, bits 12-10 = source specifier
+ * (R/M=1: operand format; R/M=0: source FP register), bits 9-7 = destination
+ * FP register, bits 6-0 = opcode. FMOVE-out uses bits 15-13 = 011, bits
+ * 12-10 = result format, bits 9-7 = source FP register.)
+ *
+ *   SFP004_C_MEM_S(fop, dst) —  op.S  #operand,FPdst   (memory single in)
+ *   SFP004_C_REG(fop, s, d)  —  op.X  FPs,FPd          (register-register)
+ *   SFP004_C_OUT_S(src)      —  FMOVE.S FPsrc,#result  (single read-out)
+ *   SFP004_C_OUT_L(src)      —  FMOVE.L FPsrc,#result  (long-int read-out,
+ *                               pair with FINTRZ to replace soft __fixsfsi)
+ */
+#define SFP004_C_MEM_S(fop, dst) (0x4400 | ((dst) << 7) | (fop))
+#define SFP004_C_REG(fop, src, dst) (((src) << 10) | ((dst) << 7) | (fop))
+#define SFP004_C_OUT_S(src) (0x6400 | ((src) << 7))
+#define SFP004_C_OUT_L(src) (0x6000 | ((src) << 7))
+
+/*
+ * The session primitives are static inline: a fused kernel issues dozens of
+ * dialogs, and a jsr/rts plus argument marshalling per dialog is measurable
+ * against the ~150-cycle dialog itself. A host-side test build can define
+ * SFP004_MOCK before including this header to get plain prototypes instead
+ * and supply its own (e.g. simulated-68881) implementations.
+ */
+#ifdef SFP004_MOCK
+
+void sfp004_begin(void);       /* FRESTORE null: start a session from idle  */
+void sfp004_cmd(unsigned short cmd);              /* register-register op   */
+void sfp004_cmd_in(unsigned short cmd, unsigned long operand); /* mem source */
+unsigned long sfp004_cmd_out(unsigned short cmd); /* read a result register */
+
+#else /* !SFP004_MOCK */
+
+/* CIR register map — see the base-address note in atari_sfp004.c (the map is
+ * defined here so both the .c dialogs and these inlines share one copy). */
+#define SFP004_CIR_BASE 0x00fffa40UL
+#define SFP004_RESPONSE ((volatile short *)(SFP004_CIR_BASE + 0x00)) /* w */
+#define SFP004_CONTROL  ((volatile short *)(SFP004_CIR_BASE + 0x02)) /* w */
+#define SFP004_SAVE     ((volatile short *)(SFP004_CIR_BASE + 0x04)) /* w */
+#define SFP004_RESTORE  ((volatile short *)(SFP004_CIR_BASE + 0x06)) /* w */
+#define SFP004_COMMAND  ((volatile short *)(SFP004_CIR_BASE + 0x0a)) /* w */
+#define SFP004_OPERAND  ((volatile long  *)(SFP004_CIR_BASE + 0x10)) /* l */
+#define SFP004_RESP_BUSY 0x8900
+
+/* Explicit-width CIR accessors, same dialog as atari_sfp004.c's private
+ * statics: write the command, spin while RESPONSE reads the $8900 busy
+ * primitive (the guard only bounds a wedged/missing coprocessor), then
+ * transfer data. */
+static inline void sfp004_i_ww(volatile short *a, short v) { __asm__ __volatile__("movew %1,%0" : "=m"(*a) : "d"(v) : "memory"); }
+static inline short sfp004_i_rw(volatile short *a)          { short v; __asm__ __volatile__("movew %1,%0" : "=d"(v) : "m"(*a)); return v; }
+static inline void sfp004_i_wl(volatile long *a, long v)    { __asm__ __volatile__("movel %1,%0" : "=m"(*a) : "d"(v) : "memory"); }
+static inline long sfp004_i_rl(volatile long *a)            { long v; __asm__ __volatile__("movel %1,%0" : "=d"(v) : "m"(*a)); return v; }
+
+static inline void sfp004_i_wait(void)
+{
+    long guard = 0x4000L;
+    while ((unsigned short)sfp004_i_rw(SFP004_RESPONSE) == SFP004_RESP_BUSY && --guard)
+        ;
+}
+
+/* FRESTORE null: start a session from idle */
+static inline void sfp004_begin(void)
+{
+    sfp004_i_ww(SFP004_RESTORE, 0x0000);
+}
+
+/* register-register op */
+static inline void sfp004_cmd(unsigned short cmd)
+{
+    sfp004_i_ww(SFP004_COMMAND, (short)cmd);
+    sfp004_i_wait();
+}
+
+/* memory-source op */
+static inline void sfp004_cmd_in(unsigned short cmd, unsigned long operand)
+{
+    sfp004_i_ww(SFP004_COMMAND, (short)cmd);
+    sfp004_i_wait();
+    sfp004_i_wl(SFP004_OPERAND, (long)operand);
+}
+
+/* read a result register */
+static inline unsigned long sfp004_cmd_out(unsigned short cmd)
+{
+    sfp004_i_ww(SFP004_COMMAND, (short)cmd);
+    sfp004_i_wait();
+    return (unsigned long)sfp004_i_rl(SFP004_OPERAND);
+}
+
+#endif /* SFP004_MOCK */
+
 #endif /* ATARI_SFP004_H */

@@ -54,42 +54,37 @@
  * Base address of the 68882 coprocessor interface registers (CIR).
  *
  * BOARD-SPECIFIC: this must match where the GAL decodes the 68882 CIR. The
- * default below is the standard SFP004 base ($FFFA40, just past the MFP). The
- * register offsets that follow assume the GAL presents the registers as the
- * standard contiguous MC68881/MC68882 CIR map at that base (response at +$00,
- * command at +$0A, operand at +$10). If the GAL decode differs, adjust the base
- * and/or the offsets to match it before relying on the dispatch path.
- */
-#define SFP004_CIR_BASE 0x00fffa40UL
-
-#define SFP004_RESPONSE ((volatile short *)(SFP004_CIR_BASE + 0x00)) /* w */
-#define SFP004_CONTROL  ((volatile short *)(SFP004_CIR_BASE + 0x02)) /* w */
-#define SFP004_SAVE     ((volatile short *)(SFP004_CIR_BASE + 0x04)) /* w */
-#define SFP004_RESTORE  ((volatile short *)(SFP004_CIR_BASE + 0x06)) /* w */
-#define SFP004_COMMAND  ((volatile short *)(SFP004_CIR_BASE + 0x0a)) /* w */
-#define SFP004_OPERAND  ((volatile long  *)(SFP004_CIR_BASE + 0x10)) /* l */
-
-/*
+ * map itself now lives in atari_sfp004.h (so the inline session primitives
+ * there and the dialogs here share one copy): the default is the standard
+ * SFP004 base ($FFFA40, just past the MFP) presenting the standard contiguous
+ * MC68881/MC68882 CIR map (response at +$00, command at +$0A, operand at
+ * +$10). If the GAL decode differs, adjust the base and/or offsets in the
+ * header before relying on the dispatch path.
+ *
  * RESPONSE value the coprocessor returns while it is still working: the Null/
- * come-again primitive $8900. The host spins while RESPONSE == $8900 and
- * proceeds (transfer operand / read result) as soon as it changes to a
- * transfer-data primitive — this is the exact-match condition the CHZ-Soft
- * SFP004 doc's working example uses (cmpiw #$8900 / beq wait), and unlike a
- * bit-8 (CA) test it works regardless of which bits the transfer primitive sets
- * on a given board. Reading RESPONSE is also what *starts* the coprocessor
- * processing the command just written.
+ * come-again primitive $8900 (SFP004_RESP_BUSY). The host spins while
+ * RESPONSE == $8900 and proceeds (transfer operand / read result) as soon as
+ * it changes to a transfer-data primitive — this is the exact-match condition
+ * the CHZ-Soft SFP004 doc's working example uses (cmpiw #$8900 / beq wait),
+ * and unlike a bit-8 (CA) test it works regardless of which bits the transfer
+ * primitive sets on a given board. Reading RESPONSE is also what *starts* the
+ * coprocessor processing the command just written.
  */
-#define SFP004_RESP_BUSY 0x8900
 
 /*
  * MC68882 cpGEN command words. Format (verified against the CHZ-Soft doc's
- * known-good FACOS word $541C): bit 15 = 0, bit 14 = R/M, bits 13-11 = source
- * specifier, bits 10-8 = destination FP register, bits 6-0 = opcode. So a
+ * known-good FACOS word $541C = FACOS.D, and the FMOVE words below): bit 15 =
+ * 0, bit 14 = R/M, bit 13 = 0, bits 12-10 = source specifier (R/M=1: operand
+ * format, 001 = single, 101 = double, 000 = long integer; R/M=0: source FP
+ * register), bits 9-7 = destination FP register, bits 6-0 = opcode. So a
  * memory-source single-precision op into FP0 is R/M=1 (bit 14), src spec = 001
- * (single), dest = 000 (FP0): base $4400 | opcode.
+ * (bits 12-10), dest = 000 (FP0): base $4400 | opcode.
  *
  * NOTE: R/M is bit 14, NOT bit 15 — a $88xx encoding (bit 15 set) is malformed
- * and the coprocessor returns garbage without executing.
+ * and the coprocessor returns garbage without executing. And the destination
+ * field sits at bits 9-7, not 10-8: every constant below targets FP0 so the
+ * distinction is invisible here, but it matters for the session-layer
+ * builders in the header (SFP004_C_MEM_S and friends).
  */
 #define SFP004_CMD_FMOVE_IN 0x4400 /* FMOVE.S <ea>,FP0  (load FP0)        */
 #define SFP004_CMD_FADD     0x4422 /* FADD.S  <ea>,FP0                    */
@@ -272,6 +267,10 @@ float sfp004_sqrt(float x)
     wr.u = sfp004_read_fp0();                /* result = FP0       */
     return wr.f;
 }
+
+/* The fused-dispatch (session) layer lives entirely in the header as static
+ * inlines — a fused kernel issues dozens of dialogs, so the per-dialog
+ * jsr/rts would be measurable. See the contract and definitions there. */
 
 /*
  * 16.16 fixed-point divide on the 68882: result = a / b in 16.16, computed as

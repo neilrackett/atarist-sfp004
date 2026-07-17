@@ -6,6 +6,7 @@
 #   make            build the static library and the test/benchmark apps
 #   make lib        build libsfp004.a only
 #   make tests      build tests/FPUTEST.TOS and tests/FPUBENCH.TOS only
+#   make examples   build the torus-knot demos in examples/
 #   make clean      remove build products
 #
 # Using the atarist-toolkit-docker image instead of a local toolchain? Just
@@ -20,7 +21,7 @@ AR := m68k-atari-mint-ar
 # library transparently falls back to soft-float when no SFP-004 is present.
 CFLAGS := -O2 -Wall -I.
 
-.PHONY: all lib tests clean
+.PHONY: all lib tests examples clean
 
 all: lib tests
 
@@ -41,5 +42,10 @@ tests/FPUTEST.TOS: tests/fputest.c atari_sfp004.c atari_sfp004.h
 tests/FPUBENCH.TOS: tests/fpubench.c atari_sfp004.c atari_sfp004.h
 	$(CC) $(CFLAGS) -o tests/FPUBENCH.TOS tests/fpubench.c atari_sfp004.c -lm
 
+## Demo programs (raymarcher + polygon-mesh torus knot) -> examples/*.TOS
+examples:
+	$(MAKE) -C examples
+
 clean:
 	rm -f atari_sfp004.o libsfp004.a tests/FPUTEST.TOS tests/FPUBENCH.TOS
+	$(MAKE) -C examples clean

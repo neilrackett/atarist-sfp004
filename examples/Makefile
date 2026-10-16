@@ -1,11 +1,12 @@
-# atarist-sfp004 examples — torus-knot demos for the SFP-004
+# atarist-sfp004 examples — 3D demos for the SFP-004
 # by Neil Rackett
 #
-#   make            build all three demos
+#   make            build all the demos
 #   make lores      TORUS.TOS     raymarcher, 80x50 chunky blocks
 #   make hires      TORUSHI.TOS   raymarcher, 160x100 chunky blocks
 #   make mesh       KNOTMESH.TOS  polygon mesh, full 320x200
 #   make cube       CUBEMESH.TOS  classic spinning cube (spec benchmark)
+#   make jet        JETMESH.TOS   F-22 model from 3DOS, full 320x200
 #   make clean      remove build products
 #
 # Same toolchain notes as the library Makefile. With atarist-toolkit-docker,
@@ -20,9 +21,9 @@ CFLAGS := -O2 -fomit-frame-pointer -Wall -I. -I..
 SFP  := ../atari_sfp004.c
 DEPS := ../atari_sfp004.c ../atari_sfp004.h sintab.h atari_megaste.c atari_megaste.h
 
-.PHONY: all lores hires mesh cube clean
+.PHONY: all lores hires mesh cube jet clean
 
-all: lores hires mesh cube
+all: lores hires mesh cube jet
 
 lores: TORUS.TOS
 
@@ -31,6 +32,8 @@ hires: TORUSHI.TOS
 mesh: KNOTMESH.TOS
 
 cube: CUBEMESH.TOS
+
+jet: JETMESH.TOS
 
 ## Real-time SDF raymarcher: every pixel is sphere-traced signed-distance
 ## work on the 68882 (fused CIR sessions). Slow and glorious.
@@ -50,5 +53,10 @@ KNOTMESH.TOS: knotmesh.c $(DEPS)
 CUBEMESH.TOS: cubemesh.c $(DEPS)
 	$(CC) $(CFLAGS) -O3 -o $@ cubemesh.c atari_megaste.c $(SFP) -lm
 
+## The low-poly F-22 from 3DOS (model data in f22.h): the mesh pipeline
+## with four materials and a 200-triangle painter's sort.
+JETMESH.TOS: jetmesh.c f22.h $(DEPS)
+	$(CC) $(CFLAGS) -O3 -o $@ jetmesh.c atari_megaste.c $(SFP) -lm
+
 clean:
-	rm -f TORUS.TOS TORUSHI.TOS KNOTMESH.TOS CUBEMESH.TOS
+	rm -f TORUS.TOS TORUSHI.TOS KNOTMESH.TOS CUBEMESH.TOS JETMESH.TOS

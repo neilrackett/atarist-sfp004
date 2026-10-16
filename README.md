@@ -13,9 +13,10 @@ By [Neil Rackett](https://x.com/neilrackett).
 <video src="https://github.com/user-attachments/assets/5397abf9-f325-4779-be83-d6a4f93b85ea" width="400" height="400" autoplay muted loop playsinline></video>
 </td>
 <td valign="top">
-<img src="examples/torus.png" height="128" /><br />
-<img src="examples/cubemesh.png" height="128" /><br />
-<img src="examples/knotmesh.png" height="128" />
+<img src="examples/torus.png" height="96" /><br />
+<img src="examples/cubemesh.png" height="96" /><br />
+<img src="examples/knotmesh.png" height="96" /><br />
+<img src="examples/jetmesh.png" height="96" />
 </td>
 </tr>
 </table>
@@ -168,7 +169,7 @@ they exercise (and confirm) the soft-float fallback.
 
 ## Examples
 
-The examples folder contains four demos built on the library's fused-dispatch
+The examples folder contains five demos built on the library's fused-dispatch
 session layer, all flat-shaded 3D in ST low-res with on-screen ms/frame
 counters.
 

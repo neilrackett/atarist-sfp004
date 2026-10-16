@@ -1,4 +1,4 @@
-# Examples — Torus-Knot & Cube Renderers
+# Examples — Torus-Knot, Cube & Jet Renderers
 
 <table>
 <tr>
@@ -6,16 +6,18 @@
 <video src="https://github.com/user-attachments/assets/5397abf9-f325-4779-be83-d6a4f93b85ea" width="400" height="400" autoplay muted loop playsinline></video>
 </td>
 <td valign="top">
-<img src="torus.png" height="128" /><br />
-<img src="cubemesh.png" height="128" /><br />
-<img src="knotmesh.png" height="128" />
+<img src="torus.png" height="96" /><br />
+<img src="cubemesh.png" height="96" /><br />
+<img src="knotmesh.png" height="96" /><br />
+<img src="jetmesh.png" height="96" />
 </td>
 </tr>
 </table>
 
-Three flat-shaded 3D demos driving the SFP-004 FPU through the library's
+Flat-shaded 3D demos driving the SFP-004 FPU through the library's
 fused-dispatch session layer: a rotating (2,3) trefoil torus knot rendered two
-very different ways, and a classic spinning cube for benchmarking. Developed
+very different ways, a classic spinning cube for benchmarking, and the
+low-poly F-22 from [3DOS](https://github.com/xms0g/3Dos). Developed
 and tuned on a Mega STE (16 MHz + cache, enabled automatically at startup)
 with a 68882 on the motherboard.
 
@@ -24,6 +26,7 @@ with a 68882 on the motherboard.
 | Raymarcher | `TORUS.TOS` / `TORUSHI.TOS` | Real-time SDF sphere tracing in chunky-sim blocks — the raw-compute flex; every pixel is honest ray-marched signed-distance-field work on the 68882 in fused CIR sessions                                                                                                                                                     | Seconds per frame | Minutes per frame |
 | Cube       | `CUBEMESH.TOS`              | The traditional flat-shaded spinning cube on the same pipeline — minimum geometry (8 vertices, ~270 coprocessor dialogs a frame). A friendly benchmark for comparing STs of different specs: the transform counter shows what the FPU buys, the rest shows CPU/bus speed, and the same binary runs (soft-float) on a stock ST | ~50 fps           | ~10 fps           |
 | Mesh       | `KNOTMESH.TOS`              | The same knot as a low-poly faceted mesh (Three.js `TorusKnotGeometry`-style, 26×6 segments): the 68882 runs the vertex rotate/project pipeline in fused sessions; the 68000 does the integer backface cull, depth-bucket painter's sort, fixed-point lighting, and span fills at full 320×200                                | ~6 fps            | ~1 fps            |
+| Jet        | `JETMESH.TOS`               | The low-poly F-22 from xms0g's MS-DOS renderer 3DOS (102 vertices, 200 triangles) on the mesh pipeline: a non-convex airframe through the depth-bucket painter's sort, with four materials each shaded on its own ramp of the 16-colour palette                                                                               | TBC               | ~1.4 fps          |
 
 ¹ 16 MHz Mega STE with cache and a 68882.
 ² Stock 8 MHz ST with soft-float no cache.
@@ -49,6 +52,7 @@ STCMD_NO_TTY=1 stcmd make -C examples
 | `make hires` | raymarcher | 160×100 @ 2×2 | `TORUSHI.TOS`  |
 | `make mesh`  | polygons   | 320×200       | `KNOTMESH.TOS` |
 | `make cube`  | polygons   | 320×200       | `CUBEMESH.TOS` |
+| `make jet`   | polygons   | 320×200       | `JETMESH.TOS`  |
 
 Mesh density is tunable with `-DTSEG=.. -DRSEG=..` (default 26×6).
 
@@ -57,7 +61,7 @@ Mesh density is tunable with `-DTSEG=.. -DRSEG=..` (default 26×6).
 Copy the `.TOS` files to your ST (or an emulator disk image) and run from the
 desktop. Press **ESC** to exit. White numbers top-left are frame timings in ms
 from the 200 Hz system tick: total frame, then FPU transform phase, then paint
-phase (mesh and cube demos). The mesh demos are double-buffered with the page
+phase (mesh, cube and jet demos). The mesh demos are double-buffered with the page
 flip latched before the VBL wait, so what you see is always a complete frame.
 
 Note: Hatari does not emulate memory-mapped FPUs, so under Hatari everything
@@ -106,6 +110,24 @@ axis normals for the integer lighting, and the span filler. What remains is
 almost pure CPU/bus work, which is what makes it a good cross-machine
 benchmark.
 
+## How the jet demo works
+
+The mesh demo's pipeline flying someone else's model: the 102-vertex,
+200-triangle F-22 that ships with xms0g's MS-DOS renderer
+[3DOS](https://github.com/xms0g/3Dos), with its paint scheme and teal sky.
+
+- **Model**: `f22.h` keeps 3DOS's vertex and triangle lists as-is. The mesh is
+  closed and consistently wound, so face normals come straight from the edge
+  cross products at startup and screen-space culling needs no fix-ups
+- **Painter's sort**: the airframe isn't convex (tail fins over the wings,
+  wings over the fuselage), so visible triangles drop into the same 256 depth
+  buckets by the sum of their three vertex depths
+- **Lighting**: four materials (hull, wings, canopy, engine), each with its
+  own 9-step ramp into a shared 16-colour palette. Half-Lambert shading, so
+  faces turned from the light keep some modelling
+- **Motion**: a turntable. Ry spins the jet about its own vertical axis
+  while Rx swings the camera between just below the wings and 45° above
+
 ## Tuning
 
 | Knob             | Where          | Effect                            |
@@ -116,4 +138,12 @@ benchmark.
 | `SDF_SCALE`      | `torus.c`      | March safety factor (twist bound) |
 | `CHECKERBOARD`   | `torus.c`      | Temporal half-resolution on/off   |
 | `angle_y/x` step | `main()` loops | Rotation speed                    |
-| `palette[]`      | both           | Colour scheme                     |
+| `ELEV_MID/SWING` | `jetmesh.c`    | Camera elevation range            |
+| `palette[]`      | all            | Colour scheme                     |
+| `ramp[]`         | `jetmesh.c`    | Per-material shading              |
+
+## Credits
+
+The F-22 model in `f22.h` is from [3DOS](https://github.com/xms0g/3Dos),
+Copyright (c) 2024 M. Sami GÜRPINAR, under the BSD 3-Clause License. The full
+notice is reproduced in `f22.h`.

@@ -6,7 +6,7 @@
 #   make            build the static library and the test/benchmark apps
 #   make lib        build libsfp004.a only
 #   make tests      build tests/FPUTEST.TOS and tests/FPUBENCH.TOS only
-#   make examples   build the torus-knot demos in examples/
+#   make examples   build the 3D demos in examples/
 #   make clean      remove build products
 #
 # Using the atarist-toolkit-docker image instead of a local toolchain? Just
@@ -42,7 +42,7 @@ tests/FPUTEST.TOS: tests/fputest.c atari_sfp004.c atari_sfp004.h
 tests/FPUBENCH.TOS: tests/fpubench.c atari_sfp004.c atari_sfp004.h
 	$(CC) $(CFLAGS) -o tests/FPUBENCH.TOS tests/fpubench.c atari_sfp004.c -lm
 
-## Demo programs (raymarcher + polygon-mesh torus knot) -> examples/*.TOS
+## Demo programs (raymarcher + polygon meshes) -> examples/*.TOS
 examples:
 	$(MAKE) -C examples
 

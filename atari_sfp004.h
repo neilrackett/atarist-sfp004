@@ -25,6 +25,10 @@
 #ifndef ATARI_SFP004_H
 #define ATARI_SFP004_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Detect the coprocessor and latch availability. Call once at startup (as part
  * of the existing FPU-detection process in atari_checkcpu.c). Safe to call from
  * user or supervisor mode; only the cookie jar is touched here. The CIR itself
@@ -188,5 +192,9 @@ static inline unsigned long sfp004_cmd_out(unsigned short cmd)
 }
 
 #endif /* SFP004_MOCK */
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* ATARI_SFP004_H */

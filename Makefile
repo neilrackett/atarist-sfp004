@@ -36,11 +36,15 @@ libsfp004.a: atari_sfp004.c atari_sfp004.h
 ## -lm: the sqrt fallback pulls in libm (the toolchain has sqrt, not sqrtf).
 tests: tests/FPUTEST.TOS tests/FPUBENCH.TOS
 
-tests/FPUTEST.TOS: tests/fputest.c atari_sfp004.c atari_sfp004.h
-	$(CC) $(CFLAGS) -o tests/FPUTEST.TOS tests/fputest.c atari_sfp004.c -lm
+## On a Mega STE they run at 8 MHz, 16 MHz and 16 MHz with cache, using the
+## examples' Mega STE helper to switch.
+MEGASTE := examples/atari_megaste.c examples/atari_megaste.h
 
-tests/FPUBENCH.TOS: tests/fpubench.c atari_sfp004.c atari_sfp004.h
-	$(CC) $(CFLAGS) -o tests/FPUBENCH.TOS tests/fpubench.c atari_sfp004.c -lm
+tests/FPUTEST.TOS: tests/fputest.c atari_sfp004.c atari_sfp004.h $(MEGASTE)
+	$(CC) $(CFLAGS) -Iexamples -o tests/FPUTEST.TOS tests/fputest.c atari_sfp004.c examples/atari_megaste.c -lm
+
+tests/FPUBENCH.TOS: tests/fpubench.c atari_sfp004.c atari_sfp004.h $(MEGASTE)
+	$(CC) $(CFLAGS) -Iexamples -o tests/FPUBENCH.TOS tests/fpubench.c atari_sfp004.c examples/atari_megaste.c -lm
 
 ## Demo programs (raymarcher + polygon meshes) -> examples/*.TOS
 examples:

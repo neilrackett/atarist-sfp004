@@ -21,6 +21,9 @@
  * `fpu` comes from the coprocessor and the comparison becomes a real
  * hardware-vs-soft-float check.
  *
+ * On a Mega STE it runs three times, at 8 MHz, 16 MHz and 16 MHz with cache,
+ * then puts the CPU back as it found it; elsewhere it runs once.
+ *
  * Build (from repo root):
  *   make -C tests fputest      -> tests/FPUTEST.TOS
  */
@@ -28,6 +31,7 @@
 #include <stdio.h>
 
 #include "atari_sfp004.h"
+#include "atari_megaste.h"
 
 enum { OP_ADD, OP_SUB, OP_MUL, OP_DIV };
 
@@ -90,11 +94,10 @@ static void fpu_probe(void)
     n2 = 0; while ((unsigned short)*PRB_RESP == 0x8900 && ++n2 < 4000) ;
     rs2 = *PRB_RESP; result = (unsigned long)*PRB_OPND;
 
-    printf("CIR trace (1.0+2.0 -> want 40400000):\n");
     printf(" in : resp=%04X poll=%d ->%04X\n", (unsigned short)ra0, n0, (unsigned short)rs0);
     printf(" add: resp=%04X poll=%d ->%04X\n", (unsigned short)ra1, n1, (unsigned short)rs1);
     printf(" out: resp=%04X poll=%d ->%04X\n", (unsigned short)ra2, n2, (unsigned short)rs2);
-    printf(" result=%08lX\n", result);
+    printf(" result=%08lX (want 40400000)\n", result);
 }
 
 /* Dispatched result (FPU when available, else soft-float). */
@@ -120,59 +123,75 @@ static float __attribute__((noinline)) run_ref(int op, float a, float b)
     }
 }
 
-/* Run all cases once and return the pass count; print each line when verbose. */
-static int run_table(int verbose)
+/* Run all cases once and return the pass count; print any that fail. */
+static int run_table(void)
 {
     int i, passed = 0;
 
     for (i = 0; i < NUM_CASES; i++) {
         fbits got, ref;
-        int   ok;
 
         got.f = run_dispatch(s_cases[i].op, s_cases[i].a, s_cases[i].b);
         ref.f = run_ref(s_cases[i].op, s_cases[i].a, s_cases[i].b);
-        ok = (got.u == ref.u);
-        if (ok)
+        if (got.u == ref.u)
             passed++;
-        if (verbose)
-            printf("%-16s fpu=%08lX ref=%08lX %s\n",
-                   s_cases[i].name, got.u, ref.u, ok ? "PASS" : "FAIL");
+        else
+            printf("FAIL %s fpu=%08lX ref=%08lX\n",
+                   s_cases[i].name, got.u, ref.u);
     }
     return passed;
 }
 
+/* Mega STE CPU speeds to test at */
+static const struct {
+    unsigned char mode;
+    const char   *name;
+} s_modes[] = {
+    { 0,                             "8MHz" },
+    { MEGASTE_16MHZ,                 "16MHz" },
+    { MEGASTE_16MHZ | MEGASTE_CACHE, "16MHz+cache" },
+};
+
 int main(void)
 {
-    int  have_fpu, passed;
-    long ssp = 0;
-    int  ssp_valid = 0;
+    int  have_fpu, passed, megaste, m, n_modes;
+    unsigned char orig = 0;
+    long ssp;
 
     printf("SFP-004 68882 FPU dispatch test\n");
 
     sfp004_init();
     have_fpu = sfp004_available();
-    if (have_fpu) {
+    megaste = is_megaste();
+    n_modes = megaste ? (int)(sizeof(s_modes) / sizeof(s_modes[0])) : 1;
+    if (have_fpu)
         printf("68882 detected: YES (testing CIR dispatch)\n");
-        /* CIR access is supervisor-only, mirror STDOOM's runtime mode. */
-        ssp = Super(0L);
-        ssp_valid = 1;
-    } else {
+    else
         printf("68882 detected: no (soft-float fallback)\n");
-    }
-    printf("comparing IEEE-754 single bit patterns\n\n");
+    printf("comparing IEEE-754 single bit patterns\n");
 
-    passed = run_table(1);
-    printf("\n%d/%d passed\n", passed, NUM_CASES);
+    /* CIR access and the Mega STE speed register are supervisor-only. */
+    ssp = Super(0L);
+    if (megaste)
+        orig = megaste_cpu_mode();
 
-    /* Trace one op's response sequence (always, to confirm the poll condition
-     * and show how few iterations a real op needs). */
-    if (have_fpu) {
+    for (m = 0; m < n_modes; m++) {
+        if (megaste)
+            megaste_set_cpu_mode(s_modes[m].mode);
         printf("\n");
-        fpu_probe();
+        passed = run_table();
+        printf("%s: %d/%d passed\n", megaste ? s_modes[m].name : "Result",
+               passed, NUM_CASES);
+
+        /* Trace one op's response sequence (to confirm the poll condition
+         * and show how few iterations a real op needs). */
+        if (have_fpu)
+            fpu_probe();
     }
 
-    if (ssp_valid)
-        Super((void *)ssp);
+    if (megaste)
+        megaste_set_cpu_mode(orig);
+    Super((void *)ssp);
 
     if (!have_fpu)
         printf("(no FPU: PASS only confirms the fallback)\n");

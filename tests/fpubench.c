@@ -20,6 +20,11 @@
  *      internally, so no doubles are needed) and reads a 32-bit result back.
  *      This is the one that could actually accelerate STDOOM.
  *
+ * On a Mega STE it runs everything three times, at 8 MHz, 16 MHz and 16 MHz
+ * with cache, then puts the CPU back as it found it; elsewhere it runs once.
+ * The results end in one table, us/op per CPU speed, sized for a 40 column
+ * screen.
+ *
  * Build (from repo root):
  *   make -C tests fpubench     -> tests/FPUBENCH.TOS
  */
@@ -28,16 +33,19 @@
 #include <stdio.h>
 
 #include "atari_sfp004.h"
+#include "atari_megaste.h"
 
+/* Iterations, chosen so that each timing spans at least ~40 ticks of the
+ * 200 Hz clock even at 16 MHz with cache (a tick either way is then <3%). */
 /* Arithmetic mix: x4 ops per iteration. */
 #define SOFT_ITERS 5000
-#define FPU_ITERS  500
+#define FPU_ITERS  2000
 /* Square root: 1 op per iteration. */
 #define SQRT_SOFT_ITERS 1000
-#define SQRT_FPU_ITERS  2000
+#define SQRT_FPU_ITERS  8000
 /* FixedDiv: 1 op per iteration. */
 #define FDIV_INT_ITERS 5000
-#define FDIV_FPU_ITERS 1000
+#define FDIV_FPU_ITERS 5000
 
 typedef long fixed_t;
 #define FRACUNIT 65536L
@@ -183,86 +191,144 @@ static fixed_t bench_fdiv_fpu(int iters)
     return r;
 }
 
-/* us per op = ticks * 5 ms * 1000 / ops. */
-static unsigned long per_op_us(unsigned long t, unsigned long ops)
+/* The six timings of a run */
+enum { ARITH_SOFT, ARITH_FPU, SQRT_SOFT, SQRT_FPU, FDIV_INT, FDIV_FPU, NUM_TIMES };
+
+static const unsigned long s_ops[NUM_TIMES] = {
+    SOFT_ITERS * 4UL, FPU_ITERS * 4UL,
+    SQRT_SOFT_ITERS, SQRT_FPU_ITERS,
+    FDIV_INT_ITERS, FDIV_FPU_ITERS
+};
+
+typedef struct {
+    unsigned long t[NUM_TIMES];   /* 200 Hz ticks */
+    fbits         r[NUM_TIMES];   /* results, to check the FPU agrees */
+} bench_run;
+
+/* Mega STE CPU speeds to run at */
+static const struct {
+    unsigned char mode;
+    const char   *name;
+} s_modes[] = {
+    { 0,                             "8MHz" },
+    { MEGASTE_16MHZ,                 "16MHz" },
+    { MEGASTE_16MHZ | MEGASTE_CACHE, "16+cache" },
+};
+#define MAX_MODES ((int)(sizeof(s_modes) / sizeof(s_modes[0])))
+
+/* Time every workload at the current CPU speed (supervisor mode). */
+static void run_bench(bench_run *b, int have)
 {
-    return (ops && t) ? (t * 5000UL / ops) : 0;
+    unsigned long t0;
+    int i;
+
+    for (i = 0; i < NUM_TIMES; i++) {
+        b->t[i] = 0;
+        b->r[i].u = 0;
+    }
+
+    t0 = ticks(); b->r[ARITH_SOFT].f = bench_soft(SOFT_ITERS); b->t[ARITH_SOFT] = ticks() - t0;
+    t0 = ticks(); b->r[SQRT_SOFT].f = bench_sqrt_soft(SQRT_SOFT_ITERS); b->t[SQRT_SOFT] = ticks() - t0;
+    t0 = ticks(); b->r[FDIV_INT].u = (unsigned long)bench_fdiv_int(FDIV_INT_ITERS); b->t[FDIV_INT] = ticks() - t0;
+    if (have) {
+        t0 = ticks(); b->r[ARITH_FPU].f = bench_fpu(FPU_ITERS); b->t[ARITH_FPU] = ticks() - t0;
+        t0 = ticks(); b->r[SQRT_FPU].f = bench_sqrt_fpu(SQRT_FPU_ITERS); b->t[SQRT_FPU] = ticks() - t0;
+        t0 = ticks(); b->r[FDIV_FPU].u = (unsigned long)bench_fdiv_fpu(FDIV_FPU_ITERS); b->t[FDIV_FPU] = ticks() - t0;
+    }
+    v_sink = b->r[ARITH_SOFT].f + b->r[ARITH_FPU].f + b->r[SQRT_SOFT].f + b->r[SQRT_FPU].f;
 }
 
-/* Print one A-vs-B comparison; the verdict is stated for side B relative to A. */
-static void report(const char *name, const char *la, const char *lb,
-                   unsigned long ta, unsigned long opa, fbits ra,
-                   unsigned long tb, unsigned long opb, fbits rb)
+/* Tenths of a microsecond per op: ticks * 5 ms * 10000 / ops. */
+static unsigned long per_op(const bench_run *b, int i)
 {
-    unsigned long ua = per_op_us(ta, opa);
-    unsigned long ub = per_op_us(tb, opb);
+    return b->t[i] ? b->t[i] * 50000UL / s_ops[i] : 0;
+}
 
-    printf("\n[%s]\n", name);
-    printf(" %s: %lu ops %lu ms %lu us/op  =%08lX\n", la, opa, ta * 5UL, ua, ra.u);
-    printf(" %s: %lu ops %lu ms %lu us/op  =%08lX\n", lb, opb, tb * 5UL, ub, rb.u);
-    if (!ua || !ub)
-        printf(" (too fast to time — raise iters)\n");
-    else if (ub >= ua)
-        printf(" => %s %lu.%02lu x SLOWER than %s\n", lb,
-               (ub * 100UL / ua) / 100, (ub * 100UL / ua) % 100, la);
-    else
-        printf(" => %s %lu.%02lu x FASTER than %s\n", lb,
-               (ua * 100UL / ub) / 100, (ua * 100UL / ub) % 100, la);
+/* One table row: us/op of timing i for each run */
+static void print_time(const char *label, const bench_run *runs, int n, int i)
+{
+    int m;
+
+    printf("%-12s", label);
+    for (m = 0; m < n; m++) {
+        unsigned long u = per_op(&runs[m], i);
+        printf("%7lu.%lu", u / 10, u % 10);
+    }
+    printf("\n");
+}
+
+/* One table row: how many times faster timing b is than timing a */
+static void print_speedup(const bench_run *runs, int n, int a, int b)
+{
+    int m;
+
+    printf("%-12s", "  x faster");
+    for (m = 0; m < n; m++) {
+        unsigned long ua = per_op(&runs[m], a), ub = per_op(&runs[m], b);
+        unsigned long x = ub ? ua * 100UL / ub : 0;
+        printf("%6lu.%02lu", x / 100, x % 100);
+    }
+    printf("\n");
 }
 
 int main(void)
 {
+    bench_run runs[MAX_MODES];
+    unsigned char orig = 0;
+    int have, megaste, n, m;
     long ssp;
-    unsigned long t0, t1;
-    unsigned long at_s, at_f = 0, qt_s, qt_f = 0, dt_i, dt_f = 0;
-    fbits ar_s, ar_f, qr_s, qr_f, dr_i, dr_f;
-    int have;
-
-    ar_f.u = qr_f.u = dr_f.u = 0;
 
     printf("SFP-004 68882 benchmark\n");
     sfp004_init();
     have = sfp004_available();
-    printf("68882 detected: %s\n", have ? "YES" : "no");
+    megaste = is_megaste();
+    n = megaste ? MAX_MODES : 1;
+    printf("68882 detected: %s\n\n", have ? "YES" : "no");
 
-    ssp = Super(0L);  /* CIR + tick reads are supervisor-only */
+    ssp = Super(0L);  /* CIR, tick and Mega STE speed reads are supervisor-only */
+    if (megaste)
+        orig = megaste_cpu_mode();
 
-    printf("\narithmetic: soft %lu / fpu %lu ops...\n",
-           (unsigned long)SOFT_ITERS * 4, (unsigned long)FPU_ITERS * 4);
-    t0 = ticks(); ar_s.f = bench_soft(SOFT_ITERS); t1 = ticks(); at_s = t1 - t0;
-    if (have) { t0 = ticks(); ar_f.f = bench_fpu(FPU_ITERS); t1 = ticks(); at_f = t1 - t0; }
+    for (m = 0; m < n; m++) {
+        bench_run *b = &runs[m];
 
-    printf("sqrt: soft %d / fpu %d ops...\n", SQRT_SOFT_ITERS, SQRT_FPU_ITERS);
-    t0 = ticks(); qr_s.f = bench_sqrt_soft(SQRT_SOFT_ITERS); t1 = ticks(); qt_s = t1 - t0;
-    if (have) { t0 = ticks(); qr_f.f = bench_sqrt_fpu(SQRT_FPU_ITERS); t1 = ticks(); qt_f = t1 - t0; }
+        if (megaste)
+            megaste_set_cpu_mode(s_modes[m].mode);
+        printf("%s... ", megaste ? s_modes[m].name : "running");
+        run_bench(b, have);
+        if (have && (b->r[ARITH_SOFT].u != b->r[ARITH_FPU].u
+                     || b->r[SQRT_SOFT].u != b->r[SQRT_FPU].u
+                     || b->r[FDIV_INT].u != b->r[FDIV_FPU].u))
+            printf("results differ:\n %08lX/%08lX %08lX/%08lX\n %08lX/%08lX\n",
+                   b->r[ARITH_SOFT].u, b->r[ARITH_FPU].u,
+                   b->r[SQRT_SOFT].u, b->r[SQRT_FPU].u,
+                   b->r[FDIV_INT].u, b->r[FDIV_FPU].u);
+        else
+            printf("ok\n");
+    }
 
-    printf("FixedDiv: int %d / fpu %d ops...\n", FDIV_INT_ITERS, FDIV_FPU_ITERS);
-    t0 = ticks(); dr_i.u = (unsigned long)bench_fdiv_int(FDIV_INT_ITERS); t1 = ticks(); dt_i = t1 - t0;
-    if (have) { t0 = ticks(); dr_f.u = (unsigned long)bench_fdiv_fpu(FDIV_FPU_ITERS); t1 = ticks(); dt_f = t1 - t0; }
-
-    v_sink = ar_s.f + ar_f.f + qr_s.f + qr_f.f;
-
+    if (megaste)
+        megaste_set_cpu_mode(orig);
     Super((void *)ssp);
 
-    if (!have) {
-        printf("\nno FPU: soft/integer only\n");
-        printf(" arith %lu us/op  sqrt %lu us/op  FixedDiv %lu us/op\n",
-               per_op_us(at_s, (unsigned long)SOFT_ITERS * 4),
-               per_op_us(qt_s, SQRT_SOFT_ITERS),
-               per_op_us(dt_i, FDIV_INT_ITERS));
-    } else {
-        report("arithmetic mul/add/sub/div", "soft ", "68882",
-               at_s, (unsigned long)SOFT_ITERS * 4, ar_s,
-               at_f, (unsigned long)FPU_ITERS * 4, ar_f);
-        report("sqrt", "soft ", "68882",
-               qt_s, SQRT_SOFT_ITERS, qr_s,
-               qt_f, SQRT_FPU_ITERS, qr_f);
-        report("FixedDiv 16.16 (160.0 / 7.0)", "int  ", "68882",
-               dt_i, FDIV_INT_ITERS, dr_i,
-               dt_f, FDIV_FPU_ITERS, dr_f);
-        if (dr_i.u != dr_f.u)
-            printf(" note: results differ by %ld (rounding) int=%08lX fpu=%08lX\n",
-                   (long)dr_f.u - (long)dr_i.u, dr_i.u, dr_f.u);
+    printf("\n%-12s", "us/op");
+    for (m = 0; m < n; m++)
+        printf("%9s", megaste ? s_modes[m].name : "now");
+    printf("\n");
+    print_time("arith soft", runs, n, ARITH_SOFT);
+    if (have) {
+        print_time("      68882", runs, n, ARITH_FPU);
+        print_speedup(runs, n, ARITH_SOFT, ARITH_FPU);
+    }
+    print_time("sqrt  soft", runs, n, SQRT_SOFT);
+    if (have) {
+        print_time("      68882", runs, n, SQRT_FPU);
+        print_speedup(runs, n, SQRT_SOFT, SQRT_FPU);
+    }
+    print_time("FixDiv int", runs, n, FDIV_INT);
+    if (have) {
+        print_time("      68882", runs, n, FDIV_FPU);
+        print_speedup(runs, n, FDIV_INT, FDIV_FPU);
     }
 
     printf("\nPress any key to quit.\n");

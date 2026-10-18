@@ -165,7 +165,8 @@ compile them with your own build (`-msoft-float`, link `-lm`).
   arithmetic mix, `sqrt`, and `FixedDiv`, reporting µs/op and the speed-up.
 
 You can run them in any resolution. They report `68882 detected: YES/no`; with no FPU
-they exercise (and confirm) the soft-float fallback.
+they exercise (and confirm) the soft-float fallback. On a Mega STE they run three
+times, at 8 MHz, 16 MHz and 16 MHz with cache, then put the CPU back as they found it.
 
 ## Examples
 

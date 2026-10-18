@@ -6,11 +6,11 @@
 <video src="https://github.com/user-attachments/assets/5397abf9-f325-4779-be83-d6a4f93b85ea" width="400" height="400" autoplay muted loop playsinline></video>
 </td>
 <td valign="top">
-<img src="torus.png" height="96" /><br />
-<img src="cubemesh.png" height="96" /><br />
-<img src="knotmesh.png" height="96" /><br />
-<img src="jetmesh.png" height="96" /><br />
-<img src="mandel.png" height="96" />
+<img src="torus.png" height="76" /><br />
+<img src="cubemesh.png" height="76" /><br />
+<img src="knotmesh.png" height="76" /><br />
+<img src="jetmesh.png" height="76" /><br />
+<img src="mandel.png" height="76" />
 </td>
 </tr>
 </table>

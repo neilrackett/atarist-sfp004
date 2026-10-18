@@ -83,7 +83,8 @@ long sfp004_fixdiv(long a, long b);
  * primitives don't check, callers gate themselves. A session owns the FPU
  * until its last read-out; don't call the scalar entry points mid-session
  * (they FRESTORE, clobbering the FP register file). Operands and results are
- * raw single-precision bit patterns (use a float/unsigned long union).
+ * raw bit patterns: singles and longs in one long, doubles in two (use a
+ * float/double and unsigned long union).
  */
 
 /* Extension-word opcodes (bits 6-0 of the cpGEN command word). FSGLDIV and
@@ -101,6 +102,7 @@ long sfp004_fixdiv(long a, long b);
 #define SFP004_FOP_FSGLDIV 0x24 /* FSGLDIV (fast single divide)            */
 #define SFP004_FOP_FSGLMUL 0x27 /* FSGLMUL (fast single multiply)          */
 #define SFP004_FOP_FSUB    0x28 /* FSUB                                    */
+#define SFP004_FOP_FCMP    0x38 /* FCMP   (sets the condition codes only)  */
 
 /* Command-word builders (cpGEN format, per the command-word notes in
  * atari_sfp004.c: bit 14 = R/M, bit 13 = 0, bits 12-10 = source specifier
@@ -109,15 +111,30 @@ long sfp004_fixdiv(long a, long b);
  * 12-10 = result format, bits 9-7 = source FP register.)
  *
  *   SFP004_C_MEM_S(fop, dst) —  op.S  #operand,FPdst   (memory single in)
+ *   SFP004_C_MEM_L(fop, dst) —  op.L  #operand,FPdst   (long integer in)
+ *   SFP004_C_MEM_D(fop, dst) —  op.D  #operand,FPdst   (double in, with
+ *                               sfp004_cmd_in_d)
  *   SFP004_C_REG(fop, s, d)  —  op.X  FPs,FPd          (register-register)
  *   SFP004_C_OUT_S(src)      —  FMOVE.S FPsrc,#result  (single read-out)
  *   SFP004_C_OUT_L(src)      —  FMOVE.L FPsrc,#result  (long-int read-out,
  *                               pair with FINTRZ to replace soft __fixsfsi)
  */
 #define SFP004_C_MEM_S(fop, dst) (0x4400 | ((dst) << 7) | (fop))
+#define SFP004_C_MEM_L(fop, dst) (0x4000 | ((dst) << 7) | (fop))
+#define SFP004_C_MEM_D(fop, dst) (0x5400 | ((dst) << 7) | (fop))
 #define SFP004_C_REG(fop, src, dst) (((src) << 10) | ((dst) << 7) | (fop))
 #define SFP004_C_OUT_S(src) (0x6400 | ((src) << 7))
 #define SFP004_C_OUT_L(src) (0x6000 | ((src) << 7))
+
+/* Conditional predicates for sfp004_cond(), tested against the condition
+ * codes of the last result (e.g. of an FCMP): these are the IEEE-aware ones,
+ * false (rather than an exception) when a NaN is involved. */
+#define SFP004_P_EQ  0x01   /* equal                  */
+#define SFP004_P_OGT 0x02   /* greater than           */
+#define SFP004_P_OGE 0x03   /* greater than or equal  */
+#define SFP004_P_OLT 0x04   /* less than              */
+#define SFP004_P_OLE 0x05   /* less than or equal     */
+#define SFP004_P_NE  0x0E   /* not equal              */
 
 /*
  * The session primitives are static inline: a fused kernel issues dozens of
@@ -131,7 +148,9 @@ long sfp004_fixdiv(long a, long b);
 void sfp004_begin(void);       /* FRESTORE null: start a session from idle  */
 void sfp004_cmd(unsigned short cmd);              /* register-register op   */
 void sfp004_cmd_in(unsigned short cmd, unsigned long operand); /* mem source */
+void sfp004_cmd_in_d(unsigned short cmd, unsigned long hi, unsigned long lo);
 unsigned long sfp004_cmd_out(unsigned short cmd); /* read a result register */
+int  sfp004_cond(unsigned short predicate);       /* 1 if the predicate holds */
 
 #else /* !SFP004_MOCK */
 
@@ -143,6 +162,7 @@ unsigned long sfp004_cmd_out(unsigned short cmd); /* read a result register */
 #define SFP004_SAVE     ((volatile short *)(SFP004_CIR_BASE + 0x04)) /* w */
 #define SFP004_RESTORE  ((volatile short *)(SFP004_CIR_BASE + 0x06)) /* w */
 #define SFP004_COMMAND  ((volatile short *)(SFP004_CIR_BASE + 0x0a)) /* w */
+#define SFP004_CONDITION ((volatile short *)(SFP004_CIR_BASE + 0x0e)) /* w */
 #define SFP004_OPERAND  ((volatile long  *)(SFP004_CIR_BASE + 0x10)) /* l */
 #define SFP004_RESP_BUSY 0x8900
 
@@ -183,12 +203,35 @@ static inline void sfp004_cmd_in(unsigned short cmd, unsigned long operand)
     sfp004_i_wl(SFP004_OPERAND, (long)operand);
 }
 
+/* double-precision memory-source op: the operand goes in high long first */
+static inline void sfp004_cmd_in_d(unsigned short cmd, unsigned long hi, unsigned long lo)
+{
+    sfp004_i_ww(SFP004_COMMAND, (short)cmd);
+    sfp004_i_wait();
+    sfp004_i_wl(SFP004_OPERAND, (long)hi);
+    sfp004_i_wl(SFP004_OPERAND, (long)lo);
+}
+
 /* read a result register */
 static inline unsigned long sfp004_cmd_out(unsigned short cmd)
 {
     sfp004_i_ww(SFP004_COMMAND, (short)cmd);
     sfp004_i_wait();
     return (unsigned long)sfp004_i_rl(SFP004_OPERAND);
+}
+
+/* Test a conditional predicate (SFP004_P_*), as FBcc does: write it to the
+ * condition CIR and wait for the result. Once the FPU has finished the last
+ * instruction it answers with a null primitive whose bit 0 is true/false. */
+static inline int sfp004_cond(unsigned short predicate)
+{
+    unsigned short r;
+    long guard = 0x4000L;
+
+    sfp004_i_ww(SFP004_CONDITION, (short)predicate);
+    while ((r = (unsigned short)sfp004_i_rw(SFP004_RESPONSE)) == SFP004_RESP_BUSY && --guard)
+        ;
+    return r & 1;
 }
 
 #endif /* SFP004_MOCK */

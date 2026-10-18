@@ -16,7 +16,8 @@ By [Neil Rackett](https://x.com/neilrackett).
 <img src="examples/torus.png" height="96" /><br />
 <img src="examples/cubemesh.png" height="96" /><br />
 <img src="examples/knotmesh.png" height="96" /><br />
-<img src="examples/jetmesh.png" height="96" />
+<img src="examples/jetmesh.png" height="96" /><br />
+<img src="examples/mandel.png" height="96" />
 </td>
 </tr>
 </table>
@@ -170,9 +171,10 @@ times, at 8 MHz, 16 MHz and 16 MHz with cache, then put the CPU back as they fou
 
 ## Examples
 
-The examples folder contains five demos built on the library's fused-dispatch
-session layer, all flat-shaded 3D in ST low-res with on-screen ms/frame
-counters.
+The examples folder contains six demos built on the library's fused-dispatch
+session layer: five flat-shaded 3D renderers in ST low-res with on-screen
+ms/frame counters, and an endless Mandelbrot zoom in the 68882's 80-bit
+registers.
 
 For more information, see [examples/README.md](examples/README.md).
 

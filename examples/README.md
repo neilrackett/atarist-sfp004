@@ -1,4 +1,4 @@
-# Examples — Torus-Knot, Cube & Jet Renderers
+# Examples — Torus-Knot, Cube & Jet Renderers, and a Mandelbrot Zoom
 
 <table>
 <tr>
@@ -9,7 +9,8 @@
 <img src="torus.png" height="96" /><br />
 <img src="cubemesh.png" height="96" /><br />
 <img src="knotmesh.png" height="96" /><br />
-<img src="jetmesh.png" height="96" />
+<img src="jetmesh.png" height="96" /><br />
+<img src="mandel.png" height="96" />
 </td>
 </tr>
 </table>
@@ -17,9 +18,10 @@
 Flat-shaded 3D demos driving the SFP-004 FPU through the library's
 fused-dispatch session layer: a rotating (2,3) trefoil torus knot rendered two
 very different ways, a classic spinning cube for benchmarking, and the
-low-poly F-22 from [3DOS](https://github.com/xms0g/3Dos). Developed
-and tuned on a Mega STE (16 MHz + cache, enabled automatically at startup)
-with a 68882 on the motherboard.
+low-poly F-22 from [3DOS](https://github.com/xms0g/3Dos); and, for something
+different, an endless zoom into the Mandelbrot set in the 68882's 80-bit
+registers. Developed and tuned on a Mega STE (16 MHz + cache, enabled
+automatically at startup) with a 68882 on the motherboard.
 
 | Demo       | Binary                      | What it is                                                                                                                                                                                                                                                                                                                    | Speed¹            | Speed²            |
 | ---------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ----------------- |
@@ -27,9 +29,12 @@ with a 68882 on the motherboard.
 | Cube       | `CUBEMESH.TOS`              | The traditional flat-shaded spinning cube on the same pipeline — minimum geometry (8 vertices, ~270 coprocessor dialogs a frame). A friendly benchmark for comparing STs of different specs: the transform counter shows what the FPU buys, the rest shows CPU/bus speed, and the same binary runs (soft-float) on a stock ST | ~50 fps           | ~10 fps           |
 | Mesh       | `KNOTMESH.TOS`              | The same knot as a low-poly faceted mesh (Three.js `TorusKnotGeometry`-style, 26×6 segments): the 68882 runs the vertex rotate/project pipeline in fused sessions; the 68000 does the integer backface cull, depth-bucket painter's sort, fixed-point lighting, and span fills at full 320×200                                | ~6 fps            | ~1 fps            |
 | Jet        | `JETMESH.TOS`               | The low-poly F-22 from xms0g's MS-DOS renderer 3DOS (102 vertices, 200 triangles) on the mesh pipeline: a non-convex airframe through the depth-bucket painter's sort, with four materials each shaded on its own ramp of the 16-colour palette                                                                               | ~10fps            | ~1.4 fps          |
+| Mandelbrot | `MANDEL.TOS`                | An endless, automatic zoom into the Mandelbrot set: dive after dive into five self-similar points, 2× a frame down to 2^46, with z iterated in the 68882's 80-bit registers and the colour bands shining outwards from the VBL                                                                                               | 10–50 s a zoom³  | ~25 min a zoom³   |
 
 ¹ 16 MHz Mega STE with cache and a 68882.
 ² Stock 8 MHz ST with soft-float no cache.
+³ Each 2× step, in [Hatari's SFP-004 emulation](#running), which is within
+about 4% of a real Mega STE on the other demos.
 
 ## Building
 
@@ -53,6 +58,7 @@ STCMD_NO_TTY=1 stcmd make -C examples
 | `make mesh`  | polygons   | 320×200       | `KNOTMESH.TOS` |
 | `make cube`  | polygons   | 320×200       | `CUBEMESH.TOS` |
 | `make jet`   | polygons   | 320×200       | `JETMESH.TOS`  |
+| `make mandel`| fractal    | 320×200       | `MANDEL.TOS`   |
 
 Mesh density is tunable with `-DTSEG=.. -DRSEG=..` (default 26×6).
 
@@ -63,9 +69,14 @@ desktop. Press **ESC** to exit. White numbers top-left are frame timings in ms
 from the 200 Hz system tick: total frame, then FPU transform phase, then paint
 phase (mesh, cube and jet demos). The mesh demos are double-buffered with the page
 flip latched before the VBL wait, so what you see is always a complete frame.
+The Mandelbrot runs full screen; any other key shows or hides an info bar with
+the dive, the depth, the view's width and the last frame's time in seconds.
 
-Note: Hatari does not emulate memory-mapped FPUs, so under Hatari everything
-runs on the soft-float fallback — correct but slow (use fast-forward).
+Stock Hatari doesn't emulate memory-mapped FPUs, so under it everything runs on
+the soft-float fallback — correct but slow (use fast-forward).
+[Neil's fork of Hatari](https://github.com/neilrackett/hatari) (its `emumd`
+branch) emulates the SFP-004 with its timing: give an ST, STE or Mega STE a
+68881 or 68882 (`--machine megaste --fpu 68882`).
 
 ## How the raymarcher works
 
@@ -128,6 +139,38 @@ The mesh demo's pipeline flying someone else's model: the 102-vertex,
 - **Motion**: a turntable. Ry spins the jet about its own vertical axis
   while Rx swings the camera between just below the wings and 45° above
 
+## How the Mandelbrot works
+
+- **Targets**: five Misiurewicz points, where the orbit of 0 lands on a
+  repelling cycle. The set looks much the same around them at every depth,
+  so each 2× step brings new spirals and branches but never fills with
+  interior, and escape counts grow only slowly. Each dive goes down to 2^46,
+  about where the 64-bit mantissa runs out, then the next one starts
+- **FPU**: the escape loop is one fused session in inline asm, each dialog
+  three instructions (write the command, poll the response). z moves round
+  FP0, FP1 and FP4, so an iteration is 8 FPU instructions with no register
+  copies; every third iteration an FCMP against the bailout in FP6 and a
+  conditional predicate (`sfp004_cond()`, the coprocessor side of FBcc) test
+  for escape. c comes from the view's doubles (`FMUL.D`/`FADD.D`), and
+  everything after is 80-bit
+- **Smooth colour**: n + 2 − log2(log2 |z|²), from |z|² read out as a single:
+  each log2 is its exponent plus a 256-entry table on the mantissa, in 8.8
+  fixed point on the 68000, cheaper than two `FLOG2`s at 581 clocks each
+- **Reuse**: zooming 2× on the centre pixel puts every other new pixel on an
+  old one, so a quarter of each frame comes free, shown at once as the old
+  frame's middle magnified. Old pixels that were guessed, or never escaped,
+  are worked out again (with more iterations as the dive goes deeper)
+- **Guessing**: a new pixel whose worked-out neighbours agree to within one
+  colour step takes their average; the rest are computed, about a third.
+  Guesses never carry into the next frame, so a filament missed once is
+  back a frame later
+- **Drawing**: each line is built 16 pixels at a time, two bitplanes to a
+  long, from tables of dithered colour bits (4×4 Bayer, four shades from
+  each colour to the next)
+- **Shine**: a VBL-queue routine rotates palette entries 1–13 through 52
+  interpolated shades of the dive's palette, so the bands flow outwards
+  without a pixel being redrawn
+
 ## Tuning
 
 | Knob             | Where          | Effect                            |
@@ -141,6 +184,11 @@ The mesh demo's pipeline flying someone else's model: the 102-vertex,
 | `ELEV_MID/SWING` | `jetmesh.c`    | Camera elevation range            |
 | `palette[]`      | all            | Colour scheme                     |
 | `ramp[]`         | `jetmesh.c`    | Per-material shading              |
+| `s_targets[]`    | `mandel.c`     | Where the dives go, and palettes  |
+| `MAX_STEP`       | `mandel.c`     | How deep each dive goes           |
+| `GUESS_T`        | `mandel.c`     | Guessing (detail vs speed)        |
+| `PER_ITER`       | `mandel.c`     | Colour bands per iteration        |
+| `CYCLE_VBLS`     | `mandel.c`     | Shine speed                       |
 
 ## Credits
 

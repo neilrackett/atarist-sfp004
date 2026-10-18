@@ -1,4 +1,4 @@
-# atarist-sfp004 examples — 3D demos for the SFP-004
+# atarist-sfp004 examples — demos for the SFP-004
 # by Neil Rackett
 #
 #   make            build all the demos
@@ -7,6 +7,7 @@
 #   make mesh       KNOTMESH.TOS  polygon mesh, full 320x200
 #   make cube       CUBEMESH.TOS  classic spinning cube (spec benchmark)
 #   make jet        JETMESH.TOS   F-22 model from 3DOS, full 320x200
+#   make mandel     MANDEL.TOS    endless shining Mandelbrot zoom
 #   make clean      remove build products
 #
 # Same toolchain notes as the library Makefile. With atarist-toolkit-docker,
@@ -21,9 +22,9 @@ CFLAGS := -O2 -fomit-frame-pointer -Wall -I. -I..
 SFP  := ../atari_sfp004.c
 DEPS := ../atari_sfp004.c ../atari_sfp004.h sintab.h atari_megaste.c atari_megaste.h
 
-.PHONY: all lores hires mesh cube jet clean
+.PHONY: all lores hires mesh cube jet mandel clean
 
-all: lores hires mesh cube jet
+all: lores hires mesh cube jet mandel
 
 lores: TORUS.TOS
 
@@ -34,6 +35,8 @@ mesh: KNOTMESH.TOS
 cube: CUBEMESH.TOS
 
 jet: JETMESH.TOS
+
+mandel: MANDEL.TOS
 
 ## Real-time SDF raymarcher: every pixel is sphere-traced signed-distance
 ## work on the 68882 (fused CIR sessions). Slow and glorious.
@@ -58,5 +61,10 @@ CUBEMESH.TOS: cubemesh.c $(DEPS)
 JETMESH.TOS: jetmesh.c f22.h $(DEPS)
 	$(CC) $(CFLAGS) -O3 -o $@ jetmesh.c atari_megaste.c $(SFP) -lm
 
+## Endless Mandelbrot zoom: the 68882 iterates in its 80-bit registers and
+## tests escape with its conditional predicates; a VBL shines the palette.
+MANDEL.TOS: mandel.c $(DEPS)
+	$(CC) $(CFLAGS) -O3 -o $@ mandel.c atari_megaste.c $(SFP) -lm
+
 clean:
-	rm -f TORUS.TOS TORUSHI.TOS KNOTMESH.TOS CUBEMESH.TOS JETMESH.TOS
+	rm -f TORUS.TOS TORUSHI.TOS KNOTMESH.TOS CUBEMESH.TOS JETMESH.TOS MANDEL.TOS
